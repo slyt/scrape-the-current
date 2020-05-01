@@ -17,14 +17,17 @@ import requests
 from bs4 import BeautifulSoup
 import datetime
 import pandas as pd
+import os
 
 # Globals
 base_url = 'https://www.thecurrent.org/playlist/'
 
 def main():
     # First day of data is 2005-12-22
-    start_date = datetime.date(2005, 12, 22)  # Year, Month, Day
+    start_date = datetime.date(2020, 4, 29)  # Year, Month, Day
     end_date = datetime.date(2020, 4, 30)
+    if not os.path.exists('output'): # create output directory if it doesn't exist
+        os.makedirs('output')
     month_iterator(start_date, end_date)
 
 
