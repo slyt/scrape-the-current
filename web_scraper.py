@@ -11,7 +11,7 @@
 # Data is periodically stored in CSV files within the project's output directory.
 # This is intended so that you can 'be nice' to their servers and save a local cache of data
 # for further processing.
-# Each CSV contains one month of data, with the filename formatted as such: playlist_YYYY_M.csv
+# Each CSV contains one month's worth of data, with the filename formatted as such: playlist_YYYY_M.csv
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,6 +22,7 @@ import pandas as pd
 base_url = 'https://www.thecurrent.org/playlist/'
 
 def main():
+    # First day of data is 2005-12-22
     start_date = datetime.date(2005, 12, 22)  # Year, Month, Day
     end_date = datetime.date(2020, 4, 30)
     month_iterator(start_date, end_date)
