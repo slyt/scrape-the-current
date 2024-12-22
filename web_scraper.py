@@ -1,9 +1,12 @@
-import requests
+import httpx
+import asyncio
 from bs4 import BeautifulSoup
 import datetime
 import pandas as pd
 import os
 import logging
+from tqdm.asyncio import tqdm
+from tenacity import retry, stop_after_attempt, wait_exponential, before_log, after_log
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -13,19 +16,39 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = 'output'
 
 # Globals
-BASE_URL = 'https://www.thecurrent.org/playlist/'
+BASE_URL = 'https://www.thecurrent.org/playlist/the-current/'
+CONCURRENT_REQUESTS = 25  # Maximum number of concurrent connections
 
-def scrape_page(curr_date):
+# Retry configuration: up to 5 attempts with exponential backoff
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    before=before_log(logger, logging.INFO),
+    after=after_log(logger, logging.INFO),
+    reraise=True
+)
+async def fetch_page(client, curr_date, semaphore):
+    """Fetch a single page asynchronously with a semaphore to limit concurrency."""
+    async with semaphore:
+        url = f"{BASE_URL}{curr_date.strftime('%Y-%m-%d')}"
+        logger.info(f"Fetching URL: {url}")
+        try:
+            response = await client.get(url)
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch page: {url} (Status code: {response.status_code})")
+                return curr_date, None
+            return curr_date, response.text
+        except Exception as e:
+            logger.error(f"Error fetching page: {url}, {e}")
+            raise
+
+async def scrape_page(client, curr_date, semaphore):
     """Scrape playlist data for a given date."""
-    url = f"{BASE_URL}{curr_date.strftime('%Y-%m-%d')}"
-    logger.info(f"Scraping URL: {url}")
+    curr_date, html = await fetch_page(client, curr_date, semaphore)
+    if not html:
+        return None, pd.DataFrame()
     
-    page = requests.get(url)
-    if page.status_code != 200:
-        logger.error(f"Failed to fetch page: {url} (Status code: {page.status_code})")
-        return pd.DataFrame()
-    
-    soup = BeautifulSoup(page.content, 'html.parser')
+    soup = BeautifulSoup(html, 'html.parser')
     playlist_cards = soup.find_all('li', class_='playlist-card')
     
     songs_data = []
@@ -59,33 +82,39 @@ def scrape_page(curr_date):
             'song_id': song_id
         })
 
-    return pd.DataFrame(songs_data)
+    return curr_date, pd.DataFrame(songs_data)
 
-def save_to_csv(df, filename):
-    """Save DataFrame to CSV."""
+async def scrape_date_range_async(start_date, end_date):
+    """Scrape playlist data over a date range asynchronously with throttling."""
+    semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS)
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        for curr_date in tqdm(
+            [start_date + datetime.timedelta(days=i) for i in range((end_date - start_date).days + 1)],
+            desc="Scraping pages",
+            unit="page",
+            mininterval=1.0
+        ):
+            _, df = await scrape_page(client, curr_date, semaphore)
+            if not df.empty:
+                filename = f"playlist_{curr_date.year}_{curr_date.month}.csv"
+                save_to_csv(df, filename, curr_date)
+
+def save_to_csv(df, filename, curr_date):
+    """Save DataFrame to CSV safely."""
     filepath = os.path.join(OUTPUT_DIR, filename)
+    # Append data to the CSV, creating it if it doesn't exist
     df.to_csv(filepath, mode='a', header=not os.path.exists(filepath), index=False, encoding='utf-8')
-    logger.info(f"Saved data to {filepath}")
-
-def scrape_date_range(start_date, end_date):
-    """Scrape playlist data over a date range."""
-    curr_date = start_date
-    while curr_date <= end_date:
-        logger.info(f"Processing date: {curr_date}")
-        daily_data = scrape_page(curr_date)
-        if not daily_data.empty:
-            filename = f"playlist_{curr_date.year}_{curr_date.month}.csv"
-            save_to_csv(daily_data, filename)
-        curr_date += datetime.timedelta(days=1)
+    logger.info(f"Saved data for {curr_date} to {filepath}")
 
 def main():
     start_date = datetime.date(2005, 12, 22)
-    end_date = datetime.date(2024, 12, 22)
+    end_date = datetime.date(2006, 12, 31)
 
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    scrape_date_range(start_date, end_date)
+    asyncio.run(scrape_date_range_async(start_date, end_date))
 
 if __name__ == "__main__":
     main()
