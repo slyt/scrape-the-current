@@ -1,151 +1,91 @@
-# Web scraper for The Current (KCMP) radio station's online playlist (thecurrent.org).
-#
-# It gathers information about songs that have been played on the radio (no audio is downloaded).
-# Information gathered includes: timestamp of when the song was played, name of song, artist,
-# album, URL to album art (if available), and song ID from the radio station's catalogue.
-#
-# The date range to be scraped can be changed via the main() function.
-# First day of data is 2005-12-22: https://www.thecurrent.org/playlist/2005-12-22
-# URL format for a given day's playlist: https://www.thecurrent.org/playlist/YYYY-MM-DD
-#
-# Data is periodically stored in CSV files within the project's output directory.
-# This is intended so that you can 'be nice' to their servers and save a local cache of data
-# for further processing.
-# Each CSV contains one month's worth of data, with the filename formatted as such: playlist_YYYY_M.csv
-
 import requests
 from bs4 import BeautifulSoup
 import datetime
 import pandas as pd
 import os
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Directory for storing output
+OUTPUT_DIR = 'output'
 
 # Globals
-base_url = 'https://www.thecurrent.org/playlist/'
+BASE_URL = 'https://www.thecurrent.org/playlist/'
+
+def scrape_page(curr_date):
+    """Scrape playlist data for a given date."""
+    url = f"{BASE_URL}{curr_date.strftime('%Y-%m-%d')}"
+    logger.info(f"Scraping URL: {url}")
+    
+    page = requests.get(url)
+    if page.status_code != 200:
+        logger.error(f"Failed to fetch page: {url} (Status code: {page.status_code})")
+        return pd.DataFrame()
+    
+    soup = BeautifulSoup(page.content, 'html.parser')
+    playlist_cards = soup.find_all('li', class_='playlist-card')
+    
+    songs_data = []
+    for card in playlist_cards:
+        title_elem = card.find('h4', class_='playlist-title')
+        artist_elems = card.find_all('div', class_='playlist-artist')
+        time_elem = card.find('div', class_='playlist-time')
+        album_art_elem = card.find('div', class_='playlist-image').find('img') if card.find('div', class_='playlist-image') else None
+        link_elem = title_elem.find('a') if title_elem else None
+        
+        title = title_elem.text.strip() if title_elem else None
+        artists = [artist.text.strip() for artist in artist_elems] if artist_elems else []
+        time_str = time_elem.text.strip() if time_elem else None
+        album_art_url = album_art_elem['src'] if album_art_elem else None
+        song_id = link_elem['href'].split('/')[-1] if link_elem and 'href' in link_elem.attrs else None
+        
+        # Combine date and time for a full timestamp
+        if time_str:
+            try:
+                timestamp = datetime.datetime.strptime(f"{curr_date} {time_str}", "%Y-%m-%d %I:%M %p")
+            except ValueError:
+                timestamp = None
+        else:
+            timestamp = None
+
+        songs_data.append({
+            'title': title,
+            'artists': ', '.join(artists),
+            'album_art_url': album_art_url,
+            'timestamp': timestamp,
+            'song_id': song_id
+        })
+
+    return pd.DataFrame(songs_data)
+
+def save_to_csv(df, filename):
+    """Save DataFrame to CSV."""
+    filepath = os.path.join(OUTPUT_DIR, filename)
+    df.to_csv(filepath, mode='a', header=not os.path.exists(filepath), index=False, encoding='utf-8')
+    logger.info(f"Saved data to {filepath}")
+
+def scrape_date_range(start_date, end_date):
+    """Scrape playlist data over a date range."""
+    curr_date = start_date
+    while curr_date <= end_date:
+        logger.info(f"Processing date: {curr_date}")
+        daily_data = scrape_page(curr_date)
+        if not daily_data.empty:
+            filename = f"playlist_{curr_date.year}_{curr_date.month}.csv"
+            save_to_csv(daily_data, filename)
+        curr_date += datetime.timedelta(days=1)
 
 def main():
-    # First day of data is 2005-12-22
-    start_date = datetime.date(2020, 4, 1)  # Year, Month, Day
-    end_date = datetime.date(2020, 4, 30)
-    if not os.path.exists('output'): # create output directory if it doesn't exist
-        os.makedirs('output')
-    month_iterator(start_date, end_date)
+    start_date = datetime.date(2005, 12, 22)
+    end_date = datetime.date(2024, 12, 22)
 
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-# Scrape song data for a given date.
-# Returns a pandas dataframe with all songs played on that day.
-def scrape_data(curr_date):
-    df_daily_data = pd.DataFrame(columns=['title',
-                                  'artist',
-                                  'album',
-                                  'album_art_url',
-                                  'song_id',
-                                  'date_time'])  # pandas dataframe
+    scrape_date_range(start_date, end_date)
 
-    url = base_url + str(curr_date)
-    print(base_url + str(curr_date))
-
-    page = requests.get(url)
-    soup = BeautifulSoup(page.content, 'html.parser')
-
-    # Song information is stored in the 'row song' class on the website
-    song_elems = soup.find_all(class_='row song')
-
-    # Keep track if the current time is AM or PM
-    eleven_pm_completed = False
-    morning = False
-
-    # Strip out necessary data for each song on the current day.
-    for song in song_elems:
-        title_elem = song.find('h5', class_='title')  # Title
-        #title = title_elem.text.encode('utf-8').strip()
-        title = title_elem.text.strip()
-
-        artist_elem = song.find('h5', class_='artist')  # Artist
-        #artist = artist_elem.text.encode('utf-8').strip()
-        artist = artist_elem.text.strip()
-        # if artist is None: artist = '' # Assume artist is required
-
-        # Album and Album Art link
-        album_element = song.find('img', class_='album-art js-lazy')# Album
-        if album_element:
-            #album = album_element.get('alt', '').encode('utf-8').strip()
-            album = album_element.get('alt', '').strip()
-            album_art_url = album_element.get('data-src','')
-        else:
-            album = ''
-            album_art_url = ''
-
-        # Song ID from The Current's catalogue
-        song_id_elem = song.find('a') # Song ID
-        if song_id_elem:
-            song_id = song_id_elem.get('href', '')
-            if song_id != '':
-                song_id = song_id[5:] # strip first five characters ('#song')
-        else:
-            song_id = ''
-
-        # Detect AM or PM
-        # The website does not have 24-hour time, so this funky logic is used to determine
-        # if the time is AM or PM. We use the fact that the songs on the page
-        # are ordered from newest (at the top) to oldest (at the bottom) [PM on top, AM on bottom].
-
-        time_elem = song.find('time') # Time
-        time = time_elem.text.strip()
-        time = datetime.datetime.strptime(time + str(curr_date), '%H:%M%Y-%m-%d')
-
-        # Keep track of when the hour switches from 11pm to 10pm.
-        if (eleven_pm_completed is False and time.hour < 11):
-            eleven_pm_completed = True
-
-        # If we see 11:00 again, and we already scraped 11:00pm, then it must be 11:00am.
-        if (eleven_pm_completed == True and time.hour == 11):
-            morning = True
-
-        # Add 12 hours to shift non-morning times to PM
-        if (morning == False and time.hour !=12):
-            time = time + datetime.timedelta(hours=12)
-
-        # Debugging - printing helps throttle requests so as to be nice to the servers.
-        #print('---- New Entry ----')
-        print(title)
-        #print(artist)
-        #print(album)
-        #print(album_art_url)
-        #print(song_id)
-        print(time)
-
-        row_dict = {'title': title, 'artist': artist, 'album': album, 'album_art_url': album_art_url, 'song_id': song_id, 'date_time': time}
-        df_daily_data = df_daily_data.append(row_dict, ignore_index=True)
-
-    return df_daily_data
-
-# Loop over months and call scrape_date() for each day.
-# Append scrape_date() to monthly CSV files: for example, playlist_2005-1.csv, playlist_2005-2
-# CSV files are saved to the output directory.
-def month_iterator(start_date, end_date):
-
-    # Iterate over Months
-    curr_date = start_date
-    delta_day = datetime.timedelta(days=1)
-    while curr_date <= end_date:
-
-        curr_month = curr_date.month
-        curr_year = curr_date.year
-        print('Incrementing Month ' + str(curr_month) + str('(Year: ' + str(curr_year) + ')'))
-        csv_filename = 'output/playlist_' + str(curr_year) + '-' + str(curr_month) + '.csv'
-        print(csv_filename)
-
-        # Iterate over Days in each month
-        while curr_date.month == curr_month and curr_date<= end_date: # Iterate until the end of the month
-
-            # Create dataframe for the day
-            df_day = scrape_data(curr_date)
-            # Append dataframe to CSV (append mode automatically creates file if it doesn't exist)
-            with open(csv_filename, 'a', newline='', encoding='utf8') as f: # open in append mode
-                df_day.to_csv(f, header=f.tell() == 0, index=False) # only add header if we have empty file
-
-            curr_date += delta_day
-
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
