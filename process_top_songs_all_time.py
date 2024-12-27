@@ -1,3 +1,6 @@
+# process_top_songs_all_time.py
+# This script will process the playlist data to find the top 89 songs played across all playlists. It will combine the data from all CSV files, calculate the song counts, and save the top 89 songs to a new CSV file in the processed directory.
+
 import pandas as pd
 from glob import glob
 import os
