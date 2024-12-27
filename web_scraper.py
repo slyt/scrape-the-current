@@ -13,11 +13,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Directory for storing output
-OUTPUT_DIR = 'output'
+OUTPUT_DIR = 'output_2'
 
 # Globals
 BASE_URL = 'https://www.thecurrent.org/playlist/the-current/'
-CONCURRENT_REQUESTS = 8  # Maximum number of concurrent connections
+CONCURRENT_REQUESTS = 32  # Maximum number of concurrent connections
 
 # Retry configuration: up to 5 attempts with exponential backoff
 @retry(
@@ -58,14 +58,14 @@ async def scrape_page(client, curr_date, semaphore):
         time_elem = card.find('div', class_='playlist-time')
         album_art_elem = card.find('div', class_='playlist-image').find('img') if card.find('div', class_='playlist-image') else None
         link_elem = title_elem.find('a') if title_elem else None
-        
+
+        # Extract title, artists, and album
         title = title_elem.text.strip() if title_elem else None
-        artists = [artist.text.strip() for artist in artist_elems] if artist_elems else []
+        artist = artist_elems[0].text.strip() if len(artist_elems) > 0 else None  # First artist is the band/artist
+        album = artist_elems[1].text.strip() if len(artist_elems) > 1 else None  # Second artist is the album
+
+        # Extract timestamp
         time_str = time_elem.text.strip() if time_elem else None
-        album_art_url = album_art_elem['src'] if album_art_elem else None
-        song_id = link_elem['href'].split('/')[-1] if link_elem and 'href' in link_elem.attrs else None
-        
-        # Combine date and time for a full timestamp
         if time_str:
             try:
                 timestamp = datetime.datetime.strptime(f"{curr_date} {time_str}", "%Y-%m-%d %I:%M %p")
@@ -74,9 +74,15 @@ async def scrape_page(client, curr_date, semaphore):
         else:
             timestamp = None
 
+        # Extract album art URL and song ID
+        album_art_url = album_art_elem['src'] if album_art_elem else None
+        song_id = link_elem['href'].split('/')[-1] if link_elem and 'href' in link_elem.attrs else None
+
+        # Add data to list
         songs_data.append({
             'title': title,
-            'artists': ', '.join(artists),
+            'artist': artist,
+            'album': album,
             'album_art_url': album_art_url,
             'timestamp': timestamp,
             'song_id': song_id
@@ -108,8 +114,8 @@ def save_to_csv(df, filename, curr_date):
     logger.info(f"Saved data for {curr_date} to {filepath}")
 
 def main():
-    start_date = datetime.date(2007, 1, 1)
-    end_date = datetime.date(2024, 12, 22)
+    start_date = datetime.date(2005, 12, 22) # First day of data is 2005-12-22
+    end_date = datetime.date(2024, 12, 26)
 
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)

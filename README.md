@@ -1,6 +1,8 @@
 # scrape-the-current
 Python web scraper for [The Current (KCMP)](https://www.thecurrent.org/playlist/) radio station's online playlist.
 
+:spiral_notepad: First day of data is 2005-12-22 (https://www.thecurrent.org/playlist/the-current/2005-12-22)
+
 ### Install dependencies
 ```
 pip install requirements.txt
