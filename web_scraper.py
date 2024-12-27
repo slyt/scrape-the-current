@@ -17,7 +17,7 @@ OUTPUT_DIR = 'output'
 
 # Globals
 BASE_URL = 'https://www.thecurrent.org/playlist/the-current/'
-CONCURRENT_REQUESTS = 25  # Maximum number of concurrent connections
+CONCURRENT_REQUESTS = 8  # Maximum number of concurrent connections
 
 # Retry configuration: up to 5 attempts with exponential backoff
 @retry(
@@ -108,8 +108,8 @@ def save_to_csv(df, filename, curr_date):
     logger.info(f"Saved data for {curr_date} to {filepath}")
 
 def main():
-    start_date = datetime.date(2005, 12, 22)
-    end_date = datetime.date(2006, 12, 31)
+    start_date = datetime.date(2007, 1, 1)
+    end_date = datetime.date(2024, 12, 22)
 
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
